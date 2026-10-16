@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>領収書 | Jack in the Board</title>
+<style>
+  /* 購入者が開くページ。紙の領収書をそのまま画面に置き、下に検証バッジとPDFボタン */
+  :root{
+    --bg:#ece9e4; --paper:#fffdf9; --ink:#1f1a24; --muted:#6d6573; --line:#cfc7d3;
+    --accent:#4a2c5c; --ok:#1f6b43; --okbg:#e3f1e8; --ng:#a3261c; --ngbg:#f8e4e1;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#17141b; --paper:#fffdf9; --ink:#1f1a24; --muted:#6d6573; --line:#cfc7d3;
+      --accent:#b99ad0; --ok:#7fd3a3; --okbg:#173326; --ng:#f0948a; --ngbg:#3a1a17; }
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP","Yu Gothic",Meiryo,sans-serif;}
+  .wrap{max-width:560px;margin:0 auto;padding:20px max(16px,env(safe-area-inset-right)) 48px max(16px,env(safe-area-inset-left));}
+  .badge{display:flex;gap:10px;align-items:flex-start;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:14px;line-height:1.5;}
+  .badge.ok{background:var(--okbg);color:var(--ok);}
+  .badge.ng{background:var(--ngbg);color:var(--ng);}
+  .badge b{display:block;font-size:15px;}
+  .badge .ic{font-size:20px;line-height:1.1;}
+  .actions{display:flex;flex-direction:column;gap:10px;margin-top:16px;}
+  .btn{display:block;width:100%;padding:15px;font-size:16px;font-weight:bold;border:0;border-radius:10px;background:var(--accent);color:#fff;text-align:center;}
+  @media (prefers-color-scheme: dark){ .btn{color:#17141b;} }
+  .btn:disabled{opacity:.5;}
+  .hint{font-size:12px;color:var(--muted);line-height:1.7;margin-top:12px;}
+  @media (prefers-color-scheme: dark){ .hint{color:#a79fae;} }
+
+  /* ---- 領収書本体（画面・PDF共通） ---- */
+  .paper{background:var(--paper);color:var(--ink);border-radius:4px;box-shadow:0 1px 2px rgba(0,0,0,.12),0 6px 20px rgba(0,0,0,.08);
+    padding:28px 22px;font-size:13px;}
+  .paper h1{margin:0;text-align:center;font-size:24px;letter-spacing:.6em;padding:0 0 8px .6em;border-bottom:3px double var(--ink);font-weight:600;}
+  .meta{text-align:right;margin:8px 0 20px;line-height:1.7;font-size:12px;font-variant-numeric:tabular-nums;}
+  .to{font-size:18px;border-bottom:1px solid var(--ink);padding:0 2px 4px;margin-bottom:18px;display:flex;justify-content:space-between;gap:12px;}
+  .to span:first-child{min-width:0;overflow-wrap:anywhere;}
+  .amount{border:1px solid var(--ink);background:#f3f0ea;text-align:center;padding:12px;font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;}
+  .amount small{font-size:12px;font-weight:400;margin-left:6px;}
+  .purpose{margin:10px 0 2px;}
+  .recv{margin-bottom:18px;}
+  table{width:100%;border-collapse:collapse;font-size:12px;}
+  th,td{border:1px solid #9b93a0;padding:5px 6px;}
+  th{background:#f3f0ea;font-weight:400;}
+  td.r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+  tr.sum td{font-weight:700;}
+  .tax{margin-top:8px;font-size:11px;text-align:right;font-variant-numeric:tabular-nums;color:#4a4450;}
+  .foot{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;margin-top:24px;}
+  .qr{width:84px;flex:none;text-align:center;font-size:8px;color:#6d6573;line-height:1.3;}
+  .qr img,.qr canvas{width:84px!important;height:84px!important;display:block;}
+  .issuer{text-align:right;line-height:1.7;font-size:12px;}
+  .issuer .lbl{font-size:10px;color:#6d6573;}
+  .issuer .nm{font-size:14px;font-weight:700;}
+
+  /* PDF用のA4ノード（画面外に置く） */
+  #a4{position:fixed;left:-10000px;top:0;width:794px;min-height:1123px;background:#fffdf9;padding:64px 70px;border-radius:0;box-shadow:none;font-size:14px;}
+  #a4 h1{font-size:30px;}
+  #a4 .to{font-size:22px;}
+  #a4 .amount{font-size:30px;padding:16px;}
+  #a4 table{font-size:13px;}
+  #a4 .qr{width:110px;}
+  #a4 .qr img,#a4 .qr canvas{width:110px!important;height:110px!important;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="badge" class="badge" hidden></div>
+  <div id="view"></div>
+  <div class="actions" id="actions" hidden>
+    <button class="btn" id="dl">PDFをダウンロード</button>
+  </div>
+  <p class="hint" id="hint" hidden>
+    このページのURLそのものが領収書の原本です。PDFを保存したあとも、URL（またはPDF右下のQR）から内容と真正性をいつでも確認できます。
+  </p>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+/* ================= 設定 ================= */
+const ISSUER = {
+  event: 'ゲームマーケット2026秋',
+  name: 'Jack in the Board',
+  person: '',        // 事業者として個人名を載せる場合
+  address: '',       // 住所を載せる場合
+  contact: '',       // 連絡先メールなど
+  x: '@JackInTheBoard',
+  invoiceRegNo: '',  // 適格請求書発行事業者なら 'T' + 13桁
+};
+// 発行画面で作った「公開鍵」を貼り付ける。鍵を作り直したら古いものは消さずに追加する
+const PUBLIC_KEYS = [
+  // 'BAxx...（発行画面の「公開鍵」）',
+];
+/* ======================================= */
+
+const $ = (id) => document.getElementById(id);
+const yen = (n) => '¥' + Number(n).toLocaleString('ja-JP');
+const esc = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function b64uToBytes(s){
+  s = s.replace(/-/g,'+').replace(/_/g,'/'); while (s.length % 4) s += '=';
+  const bin = atob(s); const out = new Uint8Array(bin.length);
+  for (let i=0;i<bin.length;i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function verify(payloadB64, sigB64){
+  const data = new TextEncoder().encode(payloadB64);
+  const sig = b64uToBytes(sigB64);
+  for (const pk of PUBLIC_KEYS){
+    try{
+      const key = await crypto.subtle.importKey('raw', b64uToBytes(pk), {name:'ECDSA', namedCurve:'P-256'}, false, ['verify']);
+      if (await crypto.subtle.verify({name:'ECDSA', hash:'SHA-256'}, key, sig, data)) return true;
+    }catch(e){ /* 次の鍵へ */ }
+  }
+  return false;
+}
+
+function decodePayload(b64){
+  const json = new TextDecoder().decode(b64uToBytes(b64));
+  const p = JSON.parse(json);
+  if (p.v !== 1 || !Array.isArray(p.l)) throw new Error('bad payload');
+  return p;
+}
+
+function receiptHtml(p){
+  const lines = p.l.map(([name, price, qty, rate]) => ({name, price, qty, rate, amount: price*qty}));
+  const total = lines.reduce((s,l)=>s+l.amount,0);
+  const byRate = {};
+  lines.forEach(l => byRate[l.rate] = (byRate[l.rate]||0) + l.amount);
+  const taxes = Object.keys(byRate).map(Number).sort((a,b)=>b-a)
+    .map(r => r + '%対象 ' + yen(byRate[r]) + '（うち消費税 ' + yen(Math.floor(byRate[r]*r/(100+r))) + '）').join('　');
+  const d = new Date(p.d + 'T00:00:00+09:00');
+  const dateJa = d.getFullYear() + '年' + (d.getMonth()+1) + '月' + d.getDate() + '日';
+  const issuer = [
+    '<div class="lbl">発行者</div>',
+    '<div class="nm">' + esc(ISSUER.event) + '　' + esc(ISSUER.name) + '</div>',
+    ISSUER.person ? '<div>' + esc(ISSUER.person) + '</div>' : '',
+    ISSUER.address ? '<div>' + esc(ISSUER.address) + '</div>' : '',
+    ISSUER.contact ? '<div>' + esc(ISSUER.contact) + '</div>' : '',
+    ISSUER.x ? '<div>X：' + esc(ISSUER.x) + '</div>' : '',
+    ISSUER.invoiceRegNo ? '<div>登録番号：' + esc(ISSUER.invoiceRegNo) + '</div>' : '',
+  ].join('');
+  const rows = lines.map(l =>
+    '<tr><td>' + esc(l.name) + (l.rate === 8 ? ' ※' : '') + '</td><td class="r">' + yen(l.price) +
+    '</td><td class="r">' + l.qty + '</td><td class="r">' + yen(l.amount) + '</td></tr>').join('');
+  return {
+    total,
+    html:
+      '<h1>領収書</h1>' +
+      '<div class="meta">No. ' + esc(p.n) + '<br>発行日：' + dateJa + '</div>' +
+      '<div class="to"><span>' + esc(p.to) + '</span><span>' + esc(p.h) + '</span></div>' +
+      '<div class="amount">' + yen(total) + ' -<small>（税込）</small></div>' +
+      '<div class="purpose">但し　' + esc(p.p) + '</div>' +
+      '<div class="recv">上記正に領収いたしました。</div>' +
+      '<table><tr><th>品目</th><th>単価（税込）</th><th>数量</th><th>金額（税込）</th></tr>' + rows +
+      '<tr class="sum"><td colspan="3">合計</td><td class="r">' + yen(total) + '</td></tr></table>' +
+      '<div class="tax">' + taxes + '</div>' +
+      '<div class="foot"><div class="qr"><div class="qrbox"></div>電子署名により<br>真正性を確認できます</div>' +
+      '<div class="issuer">' + issuer + '</div></div>'
+  };
+}
+
+function badge(ok, title, text){
+  const b = $('badge');
+  b.className = 'badge ' + (ok ? 'ok' : 'ng');
+  b.innerHTML = '<span class="ic">' + (ok ? '✓' : '✕') + '</span><div><b>' + title + '</b>' + text + '</div>';
+  b.hidden = false;
+}
+
+function drawQr(el){
+  el.innerHTML = '';
+  new QRCode(el, { text: location.href, width: 256, height: 256, correctLevel: QRCode.CorrectLevel.M });
+}
+
+let current = null;
+
+async function main(){
+  const frag = location.hash.slice(1);
+  const parts = frag.split('.');
+  if (parts.length !== 2 || !parts[0] || !parts[1]){
+    badge(false, '領収書データが見つかりません', 'ブースで表示されたQRコードを読み取ってください。');
+    return;
+  }
+  if (!window.crypto || !crypto.subtle){
+    badge(false, 'このブラウザでは検証できません', 'Safari・Chromeなどの最新ブラウザで開き直してください。');
+    return;
+  }
+  let p;
+  try { p = decodePayload(parts[0]); } catch(e){
+    badge(false, '領収書データを読み取れません', 'URLが途中で切れている可能性があります。もう一度QRを読み取ってください。');
+    return;
+  }
+  const ok = await verify(parts[0], parts[1]);
+  if (!ok){
+    badge(false, '正規の領収書として検証できません', 'この内容は ' + esc(ISSUER.name) + ' が発行したものと一致しません。PDFは作成できません。');
+    return;
+  }
+  const r = receiptHtml(p);
+  current = { p, total: r.total };
+  badge(true, '正規に発行された領収書です', esc(ISSUER.name) + ' の電子署名を確認しました。');
+  const paper = document.createElement('div');
+  paper.className = 'paper';
+  paper.innerHTML = r.html;
+  $('view').appendChild(paper);
+  drawQr(paper.querySelector('.qrbox'));
+  $('actions').hidden = false;
+  $('hint').hidden = false;
+  document.title = '領収書 ' + p.n + ' | ' + ISSUER.name;
+}
+
+$('dl').addEventListener('click', async () => {
+  if (!current) return;
+  const btn = $('dl');
+  btn.disabled = true; btn.textContent = 'PDFを作成中…';
+  try{
+    let a4 = $('a4');
+    if (!a4){
+      a4 = document.createElement('div');
+      a4.id = 'a4'; a4.className = 'paper';
+      a4.innerHTML = receiptHtml(current.p).html;
+      document.body.appendChild(a4);
+      drawQr(a4.querySelector('.qrbox'));
+      await new Promise(r => setTimeout(r, 120)); // QR画像の描画待ち
+    }
+    const canvas = await html2canvas(a4, { scale: 2, backgroundColor: '#fffdf9', windowWidth: 900 });
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+    const w = 210, h = Math.min(297, canvas.height * w / canvas.width);
+    pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, w, h);
+    pdf.setProperties({ title: '領収書 ' + current.p.n, author: ISSUER.name });
+    pdf.save('領収書_' + current.p.n + '.pdf');
+  }catch(e){
+    alert('PDFの作成に失敗しました。画面のスクリーンショットでも内容は保存できます。');
+  }finally{
+    btn.disabled = false; btn.textContent = 'PDFをダウンロード';
+  }
+});
+
+window.addEventListener('hashchange', () => location.reload());
+main();
+</script>
+</body>
+</html>

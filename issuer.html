@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="robots" content="noindex">
+<title>領収書発行 | Jack in the Board</title>
+<style>
+  /* スタッフ用。片手で操作できる縦1列、発行後はQRを画面いっぱいに */
+  :root{
+    --bg:#f4f2f6; --card:#ffffff; --ink:#1f1a24; --muted:#6d6573; --line:#dcd5e0;
+    --accent:#4a2c5c; --onaccent:#fff; --ng:#a3261c; --ok:#1f6b43;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#141118; --card:#1f1b25; --ink:#ece7f0; --muted:#a79fae; --line:#3a3342;
+      --accent:#b99ad0; --onaccent:#17141b; --ng:#f0948a; --ok:#7fd3a3; color-scheme:dark; }
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-size:16px;
+    font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP","Yu Gothic",Meiryo,sans-serif;}
+  .wrap{max-width:520px;margin:0 auto;padding:16px max(16px,env(safe-area-inset-right)) 48px max(16px,env(safe-area-inset-left));}
+  header{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px;}
+  header h1{font-size:18px;margin:0;}
+  header nav{display:flex;gap:6px;}
+  header nav button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:6px 12px;font-size:13px;}
+  header nav button.on{background:var(--accent);color:var(--onaccent);border-color:var(--accent);}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px;}
+  .card h2{font-size:14px;margin:0 0 10px;color:var(--muted);font-weight:600;}
+  label{display:block;font-size:13px;color:var(--muted);margin:0 0 6px;}
+  input[type=text],input[type=date],textarea{width:100%;font-size:16px;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-family:inherit;}
+  textarea{font-size:12px;font-family:ui-monospace,Menlo,monospace;min-height:84px;}
+  .field{margin-bottom:14px;}
+  .field:last-child{margin-bottom:0;}
+  .row{display:flex;gap:8px;align-items:center;}
+  .row > input{flex:1;min-width:0;}
+  .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;flex:none;}
+  .seg button{border:0;background:var(--card);color:var(--ink);padding:11px 12px;font-size:15px;}
+  .seg button.on{background:var(--accent);color:var(--onaccent);}
+  .item{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);}
+  .item:last-child{border-bottom:0;}
+  .item .pr{font-size:13px;color:var(--muted);}
+  .stepper{display:flex;align-items:center;gap:6px;flex:none;}
+  .stepper button{width:42px;height:42px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:20px;}
+  .stepper span{min-width:28px;text-align:center;font-size:19px;font-variant-numeric:tabular-nums;}
+  .total{display:flex;justify-content:space-between;align-items:baseline;margin-top:10px;font-size:14px;color:var(--muted);}
+  .total b{font-size:24px;color:var(--ink);font-variant-numeric:tabular-nums;}
+  .btn{display:block;width:100%;padding:15px;font-size:16px;font-weight:bold;border:0;border-radius:10px;background:var(--accent);color:var(--onaccent);}
+  .btn.sub{background:transparent;color:var(--accent);border:1px solid var(--accent);font-weight:600;padding:12px;font-size:15px;}
+  .btn:disabled{opacity:.45;}
+  .stack{display:flex;flex-direction:column;gap:10px;}
+  .err{color:var(--ng);font-size:14px;min-height:1.2em;margin:8px 0 0;}
+  .okmsg{color:var(--ok);font-size:14px;}
+  .note{font-size:12px;color:var(--muted);line-height:1.7;margin:0;}
+  .warn{font-size:12px;line-height:1.7;margin:0;color:var(--ng);}
+  /* QR表示 */
+  #qrView .qrwrap{background:#fff;border-radius:12px;padding:16px;display:flex;justify-content:center;}
+  #qrBox img,#qrBox canvas{width:min(78vw,340px)!important;height:auto!important;image-rendering:pixelated;}
+  .sum{text-align:center;margin:12px 0 4px;}
+  .sum .no{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;}
+  .sum .to{font-size:17px;margin:2px 0;}
+  .sum .amt{font-size:26px;font-weight:bold;font-variant-numeric:tabular-nums;}
+  /* 履歴 */
+  .log{width:100%;border-collapse:collapse;font-size:13px;}
+  .log td{padding:8px 4px;border-bottom:1px solid var(--line);vertical-align:top;}
+  .log td.r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+  .log button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:6px;padding:4px 8px;font-size:12px;}
+  .scroll{overflow-x:auto;}
+  code.key{display:block;word-break:break-all;font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>領収書発行</h1>
+    <nav>
+      <button type="button" data-tab="issue" class="on">発行</button>
+      <button type="button" data-tab="log">履歴</button>
+      <button type="button" data-tab="setup">設定</button>
+    </nav>
+  </header>
+
+  <!-- 発行フォーム -->
+  <section id="tab-issue">
+    <div id="noKey" class="card" hidden>
+      <p class="warn">署名用の鍵がこの端末にありません。「設定」で鍵を作成するか、バックアップから復元してください。</p>
+    </div>
+    <div id="form">
+      <div class="card">
+        <div class="field">
+          <label for="to">宛名</label>
+          <div class="row">
+            <input id="to" type="text" maxlength="60" placeholder="株式会社○○ / 山田 太郎" autocomplete="off">
+            <div class="seg" id="hon">
+              <button type="button" data-v="様" class="on">様</button>
+              <button type="button" data-v="御中">御中</button>
+            </div>
+          </div>
+        </div>
+        <div class="field">
+          <label for="purpose">但し書き</label>
+          <input id="purpose" type="text" maxlength="40">
+        </div>
+        <div class="field">
+          <label for="date">発行日</label>
+          <input id="date" type="date">
+        </div>
+      </div>
+      <div class="card">
+        <h2>品目</h2>
+        <div id="items"></div>
+        <div class="total"><span>合計（税込）</span><b id="sumTotal">¥0</b></div>
+      </div>
+      <button class="btn" id="issueBtn">発行してQRを表示</button>
+      <p class="err" id="e1"></p>
+    </div>
+
+    <!-- 発行後のQR -->
+    <div id="qrView" hidden>
+      <div class="card">
+        <div class="qrwrap"><div id="qrBox"></div></div>
+        <div class="sum">
+          <div class="no" id="qNo"></div>
+          <div class="to" id="qTo"></div>
+          <div class="amt" id="qAmt"></div>
+        </div>
+        <p class="note" style="text-align:center">お客様のスマホのカメラで読み取ってもらい、<br>表示されたページから「PDFをダウンロード」</p>
+      </div>
+      <div class="stack">
+        <button class="btn" id="nextBtn">次の人へ</button>
+        <button class="btn sub" id="copyUrl">URLをコピー</button>
+      </div>
+      <p class="okmsg" id="copied"></p>
+    </div>
+  </section>
+
+  <!-- 履歴 -->
+  <section id="tab-log" hidden>
+    <div class="card">
+      <h2>この端末で発行した領収書</h2>
+      <div class="scroll"><table class="log" id="logTable"></table></div>
+      <p class="note" id="logEmpty">まだ発行していません。</p>
+    </div>
+    <div class="stack">
+      <button class="btn sub" id="csvBtn">CSVでダウンロード（freee入力用）</button>
+    </div>
+  </section>
+
+  <!-- 設定 -->
+  <section id="tab-setup" hidden>
+    <div class="card">
+      <h2>署名用の鍵</h2>
+      <div id="keyNone" class="stack">
+        <p class="note">最初に一度だけ作成します。作成した「公開鍵」を receipt.html の PUBLIC_KEYS に貼り付けて公開してください。</p>
+        <button class="btn" id="genKey">鍵を作成</button>
+      </div>
+      <div id="keyHave" hidden>
+        <label>公開鍵（receipt.html に貼る。人に見られても問題なし）</label>
+        <code class="key" id="pubKey"></code>
+        <div class="stack" style="margin-top:10px">
+          <button class="btn sub" id="copyPub">公開鍵をコピー</button>
+        </div>
+      </div>
+      <p class="okmsg" id="keyMsg"></p>
+    </div>
+
+    <div class="card" id="backupCard" hidden>
+      <h2>鍵のバックアップ</h2>
+      <p class="warn">このバックアップがあると誰でもあなたの名義で領収書を発行できます。パスワード管理アプリなど安全な場所に保存し、SNSやチャットには貼らないでください。</p>
+      <div class="stack" style="margin-top:10px">
+        <button class="btn sub" id="showBackup">バックアップを表示</button>
+      </div>
+      <textarea id="backupText" readonly hidden style="margin-top:10px"></textarea>
+    </div>
+
+    <div class="card">
+      <h2>バックアップから復元（別の端末で使う場合）</h2>
+      <div class="field"><textarea id="restoreText" placeholder="バックアップ文字列を貼り付け"></textarea></div>
+      <button class="btn sub" id="restoreBtn">復元</button>
+      <p class="err" id="restoreErr"></p>
+    </div>
+
+    <div class="card">
+      <h2>発行の設定</h2>
+      <div class="field">
+        <label for="baseUrl">購入者ページのURL（receipt.html）</label>
+        <input id="baseUrl" type="text" inputmode="url" placeholder="https://xxxx.github.io/receipt/receipt.html">
+      </div>
+      <div class="field">
+        <label for="prefix">領収書番号の接頭辞（端末ごとに変える）</label>
+        <input id="prefix" type="text" maxlength="12">
+      </div>
+      <div class="field">
+        <label>次の番号</label>
+        <div class="row"><input id="seq" type="text" inputmode="numeric"></div>
+      </div>
+      <button class="btn sub" id="saveSettings">保存</button>
+      <p class="okmsg" id="setMsg"></p>
+    </div>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+/* ================= 設定 ================= */
+const CONFIG = {
+  // receipt.html を公開したURL（設定画面からも変更可）
+  BASE_URL: '',
+  PREFIX: 'GM26A-',
+  PURPOSE: 'ボードゲーム代として',
+  // 価格は税込。taxRate は 10 または 8
+  ITEMS: [
+    { id: 'coven', name: 'ボードゲーム「魔女協会」', price: 5000, taxRate: 10 },
+  ],
+  MAX_QTY: 20,
+};
+/* ======================================= */
+
+const $ = (id) => document.getElementById(id);
+const yen = (n) => '¥' + Number(n).toLocaleString('ja-JP');
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem('jitb_' + k); return v === null ? d : JSON.parse(v); }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem('jitb_' + k, JSON.stringify(v)); return true; }catch(e){ return false; } },
+};
+try{ navigator.storage && navigator.storage.persist && navigator.storage.persist(); }catch(e){}
+
+function bytesToB64u(bytes){
+  let bin = ''; bytes = new Uint8Array(bytes);
+  for (let i=0;i<bytes.length;i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+const strToB64u = (s) => bytesToB64u(new TextEncoder().encode(s));
+const todayJst = () => new Date(Date.now() + 9*3600e3).toISOString().slice(0,10);
+
+/* ---------- 鍵 ---------- */
+let privKey = null;
+
+async function loadKey(){
+  const jwk = store.get('privJwk', null);
+  if (!jwk) { privKey = null; return; }
+  privKey = await crypto.subtle.importKey('jwk', jwk, {name:'ECDSA', namedCurve:'P-256'}, false, ['sign']);
+}
+
+async function pubFromPrivJwk(jwk){
+  const pubJwk = { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y, ext: true };
+  const k = await crypto.subtle.importKey('jwk', pubJwk, {name:'ECDSA', namedCurve:'P-256'}, true, ['verify']);
+  return bytesToB64u(await crypto.subtle.exportKey('raw', k));
+}
+
+async function renderKeyState(){
+  const jwk = store.get('privJwk', null);
+  $('keyNone').hidden = !!jwk;
+  $('keyHave').hidden = !jwk;
+  $('backupCard').hidden = !jwk;
+  $('noKey').hidden = !!jwk;
+  $('issueBtn').disabled = !jwk;
+  if (jwk) $('pubKey').textContent = await pubFromPrivJwk(jwk);
+}
+
+$('genKey').onclick = async () => {
+  if (store.get('privJwk', null)) return;
+  const kp = await crypto.subtle.generateKey({name:'ECDSA', namedCurve:'P-256'}, true, ['sign','verify']);
+  const jwk = await crypto.subtle.exportKey('jwk', kp.privateKey);
+  if (!store.set('privJwk', jwk)) { $('keyMsg').textContent = 'この端末に保存できませんでした（プライベートブラウズを解除してください）'; return; }
+  await loadKey(); await renderKeyState();
+  $('keyMsg').textContent = '鍵を作成しました。公開鍵をコピーし、バックアップも保存してください。';
+};
+
+$('showBackup').onclick = () => {
+  const t = $('backupText');
+  t.value = btoa(JSON.stringify(store.get('privJwk', null)));
+  t.hidden = false; t.select();
+};
+
+$('restoreBtn').onclick = async () => {
+  $('restoreErr').textContent = '';
+  try{
+    const jwk = JSON.parse(atob($('restoreText').value.trim()));
+    await crypto.subtle.importKey('jwk', jwk, {name:'ECDSA', namedCurve:'P-256'}, true, ['sign']);
+    store.set('privJwk', jwk);
+    $('restoreText').value = '';
+    await loadKey(); await renderKeyState();
+    $('keyMsg').textContent = '鍵を復元しました。';
+  }catch(e){ $('restoreErr').textContent = 'バックアップ文字列を読み取れません。全体をコピーできているか確認してください。'; }
+};
+
+async function copyText(text, msgEl, msg){
+  try{ await navigator.clipboard.writeText(text); msgEl.textContent = msg; }
+  catch(e){ msgEl.textContent = 'コピーできませんでした。長押しで選択してコピーしてください。'; }
+}
+$('copyPub').onclick = () => copyText($('pubKey').textContent, $('keyMsg'), '公開鍵をコピーしました。');
+
+/* ---------- 設定 ---------- */
+function settings(){
+  return {
+    baseUrl: store.get('baseUrl', CONFIG.BASE_URL),
+    prefix: store.get('prefix', CONFIG.PREFIX),
+    seq: store.get('seq', 1),
+  };
+}
+function renderSettings(){
+  const s = settings();
+  $('baseUrl').value = s.baseUrl; $('prefix').value = s.prefix; $('seq').value = s.seq;
+}
+$('saveSettings').onclick = () => {
+  const n = parseInt($('seq').value, 10);
+  store.set('baseUrl', $('baseUrl').value.trim());
+  store.set('prefix', $('prefix').value.trim());
+  if (n > 0) store.set('seq', n);
+  renderSettings();
+  $('setMsg').textContent = '保存しました。';
+};
+
+/* ---------- 発行フォーム ---------- */
+const qty = {};
+let honorific = '様';
+
+CONFIG.ITEMS.forEach((it, i) => {
+  qty[it.id] = CONFIG.ITEMS.length === 1 ? 1 : 0;
+  const row = document.createElement('div');
+  row.className = 'item';
+  row.innerHTML = '<div><div class="nm"></div><div class="pr"></div></div>' +
+    '<div class="stepper"><button type="button" aria-label="減らす">−</button><span></span><button type="button" aria-label="増やす">＋</button></div>';
+  row.querySelector('.nm').textContent = it.name;
+  row.querySelector('.pr').textContent = yen(it.price) + '（税込）';
+  const [m, p] = row.querySelectorAll('button'); const out = row.querySelector('span');
+  const upd = () => { out.textContent = qty[it.id]; renderTotal(); };
+  m.onclick = () => { qty[it.id] = Math.max(0, qty[it.id]-1); upd(); };
+  p.onclick = () => { qty[it.id] = Math.min(CONFIG.MAX_QTY, qty[it.id]+1); upd(); };
+  out.textContent = qty[it.id];
+  $('items').appendChild(row);
+});
+
+function lines(){
+  return CONFIG.ITEMS.filter(it => qty[it.id] > 0).map(it => [it.name, it.price, qty[it.id], it.taxRate]);
+}
+function renderTotal(){
+  $('sumTotal').textContent = yen(lines().reduce((s,l)=>s+l[1]*l[2],0));
+}
+
+$('hon').querySelectorAll('button').forEach(b => b.onclick = () => {
+  honorific = b.dataset.v;
+  $('hon').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+});
+
+function resetForm(){
+  $('to').value = ''; $('purpose').value = CONFIG.PURPOSE; $('date').value = todayJst();
+  CONFIG.ITEMS.forEach(it => qty[it.id] = CONFIG.ITEMS.length === 1 ? 1 : 0);
+  $('items').querySelectorAll('.stepper span').forEach((s,i) => s.textContent = qty[CONFIG.ITEMS[i].id]);
+  renderTotal();
+}
+
+function showQr(rec){
+  $('form').hidden = true; $('qrView').hidden = false; $('copied').textContent = '';
+  $('qrBox').innerHTML = '';
+  new QRCode($('qrBox'), { text: rec.url, width: 512, height: 512, correctLevel: QRCode.CorrectLevel.L });
+  $('qNo').textContent = 'No. ' + rec.no;
+  $('qTo').textContent = rec.to + ' ' + rec.h;
+  $('qAmt').textContent = yen(rec.total);
+  $('copyUrl').onclick = () => copyText(rec.url, $('copied'), 'URLをコピーしました。');
+  window.scrollTo(0,0);
+}
+
+$('issueBtn').onclick = async () => {
+  $('e1').textContent = '';
+  const s = settings();
+  const to = $('to').value.replace(/\s+/g,' ').trim();
+  const l = lines();
+  if (!privKey) { $('e1').textContent = '鍵がありません。「設定」で作成してください。'; return; }
+  if (!/^https:\/\//.test(s.baseUrl)) { $('e1').textContent = '「設定」で購入者ページのURLを入力してください。'; return; }
+  if (!to) { $('e1').textContent = '宛名を入力してください。'; return; }
+  if (!l.length) { $('e1').textContent = '数量を入力してください。'; return; }
+
+  const no = s.prefix + String(s.seq).padStart(4, '0');
+  const payload = { v:1, n:no, d:$('date').value || todayJst(), to, h:honorific, p:$('purpose').value.trim() || CONFIG.PURPOSE, l };
+  const pB64 = strToB64u(JSON.stringify(payload));
+  const sig = await crypto.subtle.sign({name:'ECDSA', hash:'SHA-256'}, privKey, new TextEncoder().encode(pB64));
+  const url = s.baseUrl.replace(/#.*$/,'') + '#' + pB64 + '.' + bytesToB64u(sig);
+  const total = l.reduce((a,x)=>a+x[1]*x[2],0);
+  const rec = { at:new Date().toISOString(), no, date:payload.d, to, h:honorific, purpose:payload.p, l, total, url };
+
+  const log = store.get('log', []); log.push(rec);
+  if (!store.set('log', log)) { $('e1').textContent = '履歴を保存できませんでした。'; return; }
+  store.set('seq', s.seq + 1);
+  renderLog();
+  showQr(rec);
+};
+
+$('nextBtn').onclick = () => { resetForm(); $('qrView').hidden = true; $('form').hidden = false; $('to').focus(); };
+
+/* ---------- 履歴 ---------- */
+function renderLog(){
+  const log = store.get('log', []);
+  $('logEmpty').hidden = log.length > 0;
+  const t = $('logTable'); t.innerHTML = '';
+  log.slice().reverse().forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td></td><td></td><td class="r"></td><td><button type="button">QR</button></td>';
+    tr.children[0].textContent = r.no;
+    tr.children[1].textContent = r.to + ' ' + r.h;
+    tr.children[2].textContent = yen(r.total);
+    tr.querySelector('button').onclick = () => { switchTab('issue'); showQr(r); };
+    t.appendChild(tr);
+  });
+}
+
+$('csvBtn').onclick = () => {
+  const log = store.get('log', []);
+  const head = ['発行日','領収書番号','宛名','但し書き','品目','数量','合計（税込）','うち消費税','発行日時','URL'];
+  const q = (v) => '"' + String(v).replace(/"/g,'""') + '"';
+  const rows = log.map(r => {
+    const tax = r.l.reduce((s,x)=>s + Math.floor(x[1]*x[2]*x[3]/(100+x[3])), 0);
+    return [r.date, r.no, r.to + ' ' + r.h, r.purpose, r.l.map(x=>x[0]).join(' / '), r.l.map(x=>x[2]).join(' / '), r.total, tax, r.at, r.url].map(q).join(',');
+  });
+  const blob = new Blob(['﻿' + [head.map(q).join(','), ...rows].join('\r\n')], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = '領収書発行履歴_' + todayJst() + '.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+};
+
+/* ---------- タブ ---------- */
+function switchTab(name){
+  document.querySelectorAll('header nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === name));
+  ['issue','log','setup'].forEach(n => $('tab-' + n).hidden = n !== name);
+}
+document.querySelectorAll('header nav button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+
+/* ---------- 起動 ---------- */
+(async () => {
+  if (!window.crypto || !crypto.subtle){
+    document.querySelector('.wrap').innerHTML = '<p class="warn">このページは https で開く必要があります。</p>'; return;
+  }
+  resetForm(); renderSettings(); renderLog();
+  await loadKey(); await renderKeyState();
+  if (!store.get('privJwk', null) || !settings().baseUrl) switchTab('setup');
+})();
+</script>
+</body>
+</html>
