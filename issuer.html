@@ -205,7 +205,7 @@
 /* ================= 設定 ================= */
 const CONFIG = {
   // receipt.html を公開したURL（設定画面からも変更可）
-  BASE_URL: '',
+  BASE_URL: 'https://melon1891.github.io/jitb-receipt/receipt.html',
   PREFIX: 'GM26A-',
   PURPOSE: 'ボードゲーム代として',
   // 価格は税込。taxRate は 10 または 8
@@ -293,7 +293,7 @@ $('copyPub').onclick = () => copyText($('pubKey').textContent, $('keyMsg'), '公
 /* ---------- 設定 ---------- */
 function settings(){
   return {
-    baseUrl: store.get('baseUrl', CONFIG.BASE_URL),
+    baseUrl: store.get('baseUrl', '') || CONFIG.BASE_URL,
     prefix: store.get('prefix', CONFIG.PREFIX),
     seq: store.get('seq', 1),
   };
