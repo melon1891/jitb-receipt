@@ -202,7 +202,6 @@ async function main(){
   }
   const r = receiptHtml(p);
   current = { p, total: r.total };
-  badge(true, '正規に発行された領収書です', esc(ISSUER.name) + ' の電子署名を確認しました。');
   const paper = document.createElement('div');
   paper.className = 'paper';
   paper.innerHTML = r.html;
