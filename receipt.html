@@ -159,7 +159,7 @@ function receiptHtml(p){
       '<div class="recv">上記正に領収いたしました。</div>' +
       '<table><tr><th>品目</th><th>単価（税込）</th><th>数量</th><th>金額（税込）</th></tr>' + rows +
       '<tr class="sum"><td colspan="3">合計</td><td class="r">' + yen(total) + '</td></tr></table>' +
-      '<div class="tax">' + taxes + '</div>' +
+      (ISSUER.invoiceRegNo ? '<div class="tax">' + taxes + '</div>' : '') + // 消費税額は登録番号がある場合のみ表示
       '<div class="foot"><div class="qr"><div class="qrbox"></div>電子署名により<br>真正性を確認できます</div>' +
       '<div class="issuer">' + issuer + '</div></div>'
   };
