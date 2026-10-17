@@ -72,9 +72,6 @@
   <div class="actions" id="actions" hidden>
     <button class="btn" id="dl">PDFをダウンロード</button>
   </div>
-  <p class="hint" id="hint" hidden>
-    このページのURLそのものが領収書の原本です。PDFを保存したあとも、このURLを開けば内容をいつでも確認できます。
-  </p>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -201,7 +198,6 @@ async function main(){
   paper.innerHTML = r.html;
   $('view').appendChild(paper);
   $('actions').hidden = false;
-  $('hint').hidden = false;
   document.title = '領収書 ' + p.n + ' | ' + ISSUER.name;
 }
 
