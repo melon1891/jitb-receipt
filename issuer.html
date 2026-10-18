@@ -16,6 +16,7 @@
       --accent:#b99ad0; --onaccent:#17141b; --ng:#f0948a; --ok:#7fd3a3; color-scheme:dark; }
   }
   *{box-sizing:border-box;}
+  [hidden]{display:none!important;}
   body{margin:0;background:var(--bg);color:var(--ink);font-size:16px;
     font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP","Yu Gothic",Meiryo,sans-serif;}
   .wrap{max-width:520px;margin:0 auto;padding:16px max(16px,env(safe-area-inset-right)) 48px max(16px,env(safe-area-inset-left));}
@@ -82,6 +83,7 @@
 
   <!-- 発行フォーム -->
   <section id="tab-issue">
+    <p class="okmsg" id="bootMsg" hidden></p>
     <div id="noKey" class="card" hidden>
       <p class="warn">署名用の鍵がこの端末にありません。「設定」で鍵を作成するか、バックアップから復元してください。</p>
     </div>
@@ -148,7 +150,12 @@
 
   <!-- 設定 -->
   <section id="tab-setup" hidden>
-    <div class="card">
+    <div class="card" id="staffInfo" hidden>
+      <h2>店番モード</h2>
+      <p class="note" id="staffDesc"></p>
+    </div>
+
+    <div class="card" id="keyCard">
       <h2>署名用の鍵</h2>
       <div id="keyNone" class="stack">
         <p class="note">最初に一度だけ作成します。作成した「公開鍵」を receipt.html の PUBLIC_KEYS に貼り付けて公開してください。</p>
@@ -173,7 +180,36 @@
       <textarea id="backupText" readonly hidden style="margin-top:10px"></textarea>
     </div>
 
-    <div class="card">
+    <div class="card" id="staffCard" hidden>
+      <h2>店番用リンクを作成</h2>
+      <p class="note">店番の人の端末でこのリンクを開くと、その端末から領収書を発行できるようになります。あなたの鍵は渡さず、店番専用の鍵を作って渡します。</p>
+      <div class="field" style="margin-top:12px">
+        <label for="stName">店番の人の名前（控え用）</label>
+        <input id="stName" type="text" maxlength="20" placeholder="例：Aさん">
+      </div>
+      <div class="field">
+        <label for="stPrefix">領収書番号の接頭辞（人ごとに変える）</label>
+        <input id="stPrefix" type="text" maxlength="12" value="GM26B-">
+      </div>
+      <div class="field">
+        <label for="stFrom">発行できる期間</label>
+        <div class="row"><input id="stFrom" type="date"><span>〜</span><input id="stTo" type="date"></div>
+      </div>
+      <button class="btn sub" id="genStaff">リンクを作成</button>
+      <p class="err" id="stErr"></p>
+      <div id="stOut" hidden>
+        <label>店番用リンク</label>
+        <code class="key" id="stLink"></code>
+        <div class="stack" style="margin-top:10px">
+          <button class="btn sub" id="copyStaff">リンクをコピー</button>
+        </div>
+        <p class="warn" style="margin-top:10px">このリンクを知っている人は、期間内なら誰でも領収書を発行できます。本人にだけ個別に送り、グループや公開の場には貼らないでください。</p>
+        <p class="okmsg" id="stMsg"></p>
+      </div>
+      <div id="stList" style="margin-top:12px"></div>
+    </div>
+
+    <div class="card" id="restoreCard">
       <h2>バックアップから復元（別の端末で使う場合）</h2>
       <div class="field"><textarea id="restoreText" placeholder="バックアップ文字列を貼り付け"></textarea></div>
       <button class="btn sub" id="restoreBtn">復元</button>
@@ -230,15 +266,33 @@ function bytesToB64u(bytes){
   return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 }
 const strToB64u = (s) => bytesToB64u(new TextEncoder().encode(s));
+function b64uToStr(s){
+  s = s.replace(/-/g,'+').replace(/_/g,'/'); while (s.length % 4) s += '=';
+  const bin = atob(s); const out = new Uint8Array(bin.length);
+  for (let i=0;i<bin.length;i++) out[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(out);
+}
+const addDays = (ymd, n) => new Date(new Date(ymd + 'T00:00:00Z').getTime() + n*864e5).toISOString().slice(0,10);
 const todayJst = () => new Date(Date.now() + 9*3600e3).toISOString().slice(0,10);
 
 /* ---------- 鍵 ---------- */
 let privKey = null;
+let mode = null;   // 'owner'（発行者本人）/ 'staff'（店番用リンク）/ null
+
+const staffData = () => store.get('privJwk', null) ? null : store.get('staff', null);
+const staffCert = () => { const st = staffData(); return st ? JSON.parse(b64uToStr(st.c)) : null; };
 
 async function loadKey(){
   const jwk = store.get('privJwk', null);
-  if (!jwk) { privKey = null; return; }
-  privKey = await crypto.subtle.importKey('jwk', jwk, {name:'ECDSA', namedCurve:'P-256'}, false, ['sign']);
+  const st = staffData();
+  privKey = null; mode = null;
+  if (jwk){
+    privKey = await crypto.subtle.importKey('jwk', jwk, {name:'ECDSA', namedCurve:'P-256'}, false, ['sign']);
+    mode = 'owner';
+  } else if (st){
+    privKey = await crypto.subtle.importKey('jwk', st.j, {name:'ECDSA', namedCurve:'P-256'}, false, ['sign']);
+    mode = 'staff';
+  }
 }
 
 async function pubFromPrivJwk(jwk){
@@ -249,12 +303,99 @@ async function pubFromPrivJwk(jwk){
 
 async function renderKeyState(){
   const jwk = store.get('privJwk', null);
+  const isStaff = mode === 'staff';
+  $('keyCard').hidden = isStaff;
   $('keyNone').hidden = !!jwk;
   $('keyHave').hidden = !jwk;
   $('backupCard').hidden = !jwk;
-  $('noKey').hidden = !!jwk;
-  $('issueBtn').disabled = !jwk;
+  $('staffCard').hidden = !jwk;
+  $('restoreCard').hidden = isStaff;
+  $('staffInfo').hidden = !isStaff;
+  $('noKey').hidden = !!mode;
+  $('issueBtn').disabled = !mode;
+  $('prefix').disabled = isStaff;
   if (jwk) $('pubKey').textContent = await pubFromPrivJwk(jwk);
+  if (isStaff){
+    const c = staffCert();
+    $('staffDesc').textContent = (c.nm ? c.nm + ' 用。' : '') + '領収書番号は ' + c.p + '0001 から、発行できる期間は ' + c.f + ' 〜 ' + c.t + ' です。';
+  }
+  renderStaffList();
+}
+
+/* ---------- 店番用リンク ---------- */
+function renderStaffList(){
+  const list = store.get('staffLinks', []);
+  const el = $('stList'); el.innerHTML = '';
+  if (!list.length || mode !== 'owner') return;
+  const h = document.createElement('label'); h.textContent = '作成済みの店番用リンク'; el.appendChild(h);
+  list.slice().reverse().forEach(x => {
+    const d = document.createElement('div'); d.className = 'note';
+    d.textContent = (x.nm || '（名前なし）') + '：' + x.p + '　' + x.f + '〜' + x.t + '　鍵 ' + x.k.slice(0, 12) + '…';
+    d.title = x.k;
+    el.appendChild(d);
+  });
+}
+
+$('genStaff').onclick = async () => {
+  $('stErr').textContent = ''; $('stOut').hidden = true;
+  if (mode !== 'owner') return;
+  const nm = $('stName').value.trim();
+  const pf = $('stPrefix').value.trim();
+  const f = $('stFrom').value, t = $('stTo').value;
+  const used = [settings().prefix].concat(store.get('staffLinks', []).map(x => x.p));
+  if (!pf) { $('stErr').textContent = '接頭辞を入力してください。'; return; }
+  if (used.includes(pf)) { $('stErr').textContent = 'この接頭辞はすでに使っています。番号が重ならないよう別の接頭辞にしてください。'; return; }
+  if (!f || !t || f > t) { $('stErr').textContent = '発行できる期間を正しく入力してください。'; return; }
+
+  const kp = await crypto.subtle.generateKey({name:'ECDSA', namedCurve:'P-256'}, true, ['sign','verify']);
+  const sj = await crypto.subtle.exportKey('jwk', kp.privateKey);
+  const k = bytesToB64u(await crypto.subtle.exportKey('raw', kp.publicKey));
+  const cert = { v:1, k, p:pf, f, t, nm };
+  const c = strToB64u(JSON.stringify(cert));
+  const sSig = bytesToB64u(await crypto.subtle.sign({name:'ECDSA', hash:'SHA-256'}, privKey, new TextEncoder().encode(c)));
+  const bundle = { j:{ kty:sj.kty, crv:sj.crv, x:sj.x, y:sj.y, d:sj.d }, c, s:sSig };
+  const link = location.origin + location.pathname + '#staff.' + strToB64u(JSON.stringify(bundle));
+
+  const list = store.get('staffLinks', []); list.push({ nm, p:pf, f, t, k, at:new Date().toISOString() });
+  store.set('staffLinks', list);
+  $('stLink').textContent = link;
+  $('stOut').hidden = false; $('stMsg').textContent = '';
+  $('copyStaff').onclick = () => copyText(link, $('stMsg'), 'リンクをコピーしました。');
+  $('stName').value = '';
+  $('stPrefix').value = nextStaffPrefix();
+  renderStaffList();
+};
+
+function nextStaffPrefix(){
+  const used = [settings().prefix].concat(store.get('staffLinks', []).map(x => x.p));
+  for (const ch of 'BCDEFGHJKLMNPQRSTUVWXYZ'){ const p = 'GM26' + ch + '-'; if (!used.includes(p)) return p; }
+  return '';
+}
+
+async function acceptStaffLink(){
+  const h = location.hash;
+  if (!h.startsWith('#staff.')) return;
+  history.replaceState(null, '', location.pathname);
+  const msg = $('bootMsg'); msg.hidden = false;
+  if (store.get('privJwk', null)){
+    msg.className = 'err'; msg.textContent = 'この端末には発行者本人の鍵があるため、店番用リンクは読み込みませんでした。'; return;
+  }
+  try{
+    const b = JSON.parse(b64uToStr(h.slice(7)));
+    await crypto.subtle.importKey('jwk', b.j, {name:'ECDSA', namedCurve:'P-256'}, false, ['sign']);
+    const c = JSON.parse(b64uToStr(b.c));
+    if (c.v !== 1 || !c.p || !c.f || !c.t || !b.s) throw new Error('bad');
+    const prev = staffData();
+    const prevP = prev ? JSON.parse(b64uToStr(prev.c)).p : null;
+    if (!store.set('staff', b)) throw new Error('store');
+    if (prevP !== c.p) store.set('seq', 1);
+    store.set('prefix', c.p);
+    msg.className = 'okmsg';
+    msg.textContent = 'この端末で領収書を発行できるようになりました（' + (c.nm ? c.nm + '用・' : '') + c.f + '〜' + c.t + '）。';
+  }catch(e){
+    msg.className = 'err';
+    msg.textContent = '店番用リンクを読み込めませんでした。リンクが途中で切れていないか確認してください（プライベートブラウズでは使えません）。';
+  }
 }
 
 $('genKey').onclick = async () => {
@@ -371,11 +512,19 @@ $('issueBtn').onclick = async () => {
   if (!to) { $('e1').textContent = '宛名を入力してください。'; return; }
   if (!l.length) { $('e1').textContent = '数量を入力してください。'; return; }
 
-  const no = s.prefix + String(s.seq).padStart(4, '0');
-  const payload = { v:1, n:no, d:$('date').value || todayJst(), to, h:honorific, p:$('purpose').value.trim() || CONFIG.PURPOSE, l };
+  const date = $('date').value || todayJst();
+  let prefix = s.prefix, tail = '';
+  if (mode === 'staff'){
+    const c = staffCert(), st = staffData();
+    if (date < c.f || date > c.t) { $('e1').textContent = '発行日が店番用リンクの期間（' + c.f + '〜' + c.t + '）の外です。'; return; }
+    prefix = c.p;
+    tail = '.' + st.c + '.' + st.s;
+  }
+  const no = prefix + String(s.seq).padStart(4, '0');
+  const payload = { v:1, n:no, d:date, to, h:honorific, p:$('purpose').value.trim() || CONFIG.PURPOSE, l };
   const pB64 = strToB64u(JSON.stringify(payload));
   const sig = await crypto.subtle.sign({name:'ECDSA', hash:'SHA-256'}, privKey, new TextEncoder().encode(pB64));
-  const url = s.baseUrl.replace(/#.*$/,'') + '#' + pB64 + '.' + bytesToB64u(sig);
+  const url = s.baseUrl.replace(/#.*$/,'') + '#' + pB64 + '.' + bytesToB64u(sig) + tail;
   const total = l.reduce((a,x)=>a+x[1]*x[2],0);
   const rec = { at:new Date().toISOString(), no, date:payload.d, to, h:honorific, purpose:payload.p, l, total, url };
 
@@ -430,9 +579,12 @@ document.querySelectorAll('header nav button').forEach(b => b.onclick = () => sw
   if (!window.crypto || !crypto.subtle){
     document.querySelector('.wrap').innerHTML = '<p class="warn">このページは https で開く必要があります。</p>'; return;
   }
+  await acceptStaffLink();
   resetForm(); renderSettings(); renderLog();
+  $('stFrom').value = todayJst(); $('stTo').value = addDays(todayJst(), 30);
   await loadKey(); await renderKeyState();
-  if (!store.get('privJwk', null) || !settings().baseUrl) switchTab('setup');
+  $('stPrefix').value = nextStaffPrefix();
+  if (!mode || !settings().baseUrl) switchTab('setup');
 })();
 </script>
 </body>

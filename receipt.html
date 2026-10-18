@@ -16,6 +16,7 @@
       --accent:#b99ad0; --ok:#7fd3a3; --okbg:#173326; --ng:#f0948a; --ngbg:#3a1a17; }
   }
   *{box-sizing:border-box;}
+  [hidden]{display:none!important;}
   body{margin:0;background:var(--bg);color:var(--ink);
     font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP","Yu Gothic",Meiryo,sans-serif;}
   .wrap{max-width:560px;margin:0 auto;padding:20px max(16px,env(safe-area-inset-right)) 48px max(16px,env(safe-area-inset-left));}
@@ -91,6 +92,9 @@ const ISSUER = {
 const PUBLIC_KEYS = [
   'BOASvOHM0fuRQKPqqrPvjb2X1U11kW3c2ZI6D84N2KQAI2LMERIkasMrmEiNse22U-c43_0T8PjO0j7v_zcXEzU', // 2026-10-17 作成
 ];
+// 店番用リンクを無効にする場合、その鍵（発行画面の店番リンク一覧に表示）をここに入れる
+// ※その店番が発行した領収書もすべて検証できなくなるので、紛失・悪用時のみ
+const REVOKED_STAFF_KEYS = [];
 /* ======================================= */
 
 const $ = (id) => document.getElementById(id);
@@ -104,16 +108,31 @@ function b64uToBytes(s){
   return out;
 }
 
-async function verify(payloadB64, sigB64){
-  const data = new TextEncoder().encode(payloadB64);
-  const sig = b64uToBytes(sigB64);
-  for (const pk of PUBLIC_KEYS){
-    try{
-      const key = await crypto.subtle.importKey('raw', b64uToBytes(pk), {name:'ECDSA', namedCurve:'P-256'}, false, ['verify']);
-      if (await crypto.subtle.verify({name:'ECDSA', hash:'SHA-256'}, key, sig, data)) return true;
-    }catch(e){ /* 次の鍵へ */ }
-  }
+async function verifyWith(pubB64, dataStr, sigB64){
+  try{
+    const key = await crypto.subtle.importKey('raw', b64uToBytes(pubB64), {name:'ECDSA', namedCurve:'P-256'}, false, ['verify']);
+    return await crypto.subtle.verify({name:'ECDSA', hash:'SHA-256'}, key, b64uToBytes(sigB64), new TextEncoder().encode(dataStr));
+  }catch(e){ return false; }
+}
+
+async function verifyAny(dataStr, sigB64){
+  for (const pk of PUBLIC_KEYS){ if (await verifyWith(pk, dataStr, sigB64)) return true; }
   return false;
+}
+
+// parts = [データ, 署名] … 発行者本人が発行
+// parts = [データ, 署名, 店番証明, 証明の署名] … 店番用リンクで発行
+async function verify(parts, p){
+  if (parts.length === 2) return verifyAny(parts[0], parts[1]);
+  const [pB, sig, cB, cS] = parts;
+  if (!(await verifyAny(cB, cS))) return false;           // 店番証明が発行者の署名つきか
+  let c;
+  try { c = JSON.parse(new TextDecoder().decode(b64uToBytes(cB))); } catch(e){ return false; }
+  if (c.v !== 1 || !c.k || !c.p) return false;
+  if (REVOKED_STAFF_KEYS.includes(c.k)) return false;
+  if (typeof p.n !== 'string' || !p.n.startsWith(c.p)) return false; // 割り当てた番号帯か
+  if (!(p.d >= c.f && p.d <= c.t)) return false;           // 有効期間内の発行日か
+  return verifyWith(c.k, pB, sig);
 }
 
 function decodePayload(b64){
@@ -173,7 +192,7 @@ let current = null;
 async function main(){
   const frag = location.hash.slice(1);
   const parts = frag.split('.');
-  if (parts.length !== 2 || !parts[0] || !parts[1]){
+  if (!(parts.length === 2 || parts.length === 4) || parts.some(x => !x)){
     badge(false, '領収書データが見つかりません', 'ブースで表示されたQRコードを読み取ってください。');
     return;
   }
@@ -186,7 +205,7 @@ async function main(){
     badge(false, '領収書データを読み取れません', 'URLが途中で切れている可能性があります。もう一度QRを読み取ってください。');
     return;
   }
-  const ok = await verify(parts[0], parts[1]);
+  const ok = await verify(parts, p);
   if (!ok){
     badge(false, '正規の領収書として検証できません', 'この内容は ' + esc(ISSUER.name) + ' が発行したものと一致しません。PDFは作成できません。');
     return;
